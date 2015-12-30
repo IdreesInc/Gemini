@@ -27,11 +27,13 @@ public class Gemini {
     private static String twinName;
     private static Path twinPath;
     private static String waitingFor;
+    private static int attemptsToTerminateTwin;
     private static final String TOKEN = "⬡";
     private static final String SEPERATOR = File.separator;
     private static final int MAX_DISTANCE = 5;
     private static final int MAX_ATTEMPTS = 10;
     private static final int UPDATE_INTERVAL = 500;
+    private static final boolean AVOID_HIDDEN_FOLDERS = true;
 
     public static void main(String[] args) {
         String clipboardText = getClipboardText();
@@ -54,24 +56,7 @@ public class Gemini {
         } else { //If this is the first instance of Gemini
             name = "Artemis";
             twinName = "Apollo";
-            twinPath = null;
-            int attempts = 0;
-            while (twinPath == null && attempts < MAX_ATTEMPTS) {
-                twinPath = duplicate();
-                attempts++;
-            }
-            if (twinPath == null) {
-                System.err.println("Unable to generate twin");
-                terminate();
-            } else {
-                System.out.println("Generated twin at " + twinPath);
-            }
-            sendClipboardMessage("Waiting for twin");
-            waitingFor = "activated";
-            try {
-                Runtime.getRuntime().exec(" java -jar " + twinPath.toString());
-            } catch (IOException ex) {
-            }
+            createTwin();
         }
         //Update loop
         Timer timer = new Timer();
@@ -83,27 +68,92 @@ public class Gemini {
         @Override
         public void run() {
             String clipboardText = getClipboardText();
-            if (clipboardText != null && clipboardText.startsWith(TOKEN + twinName)) {
-                System.out.println(clipboardText);
-                if (waitingFor != null && clipboardText.contains(waitingFor)) {
-                    String[] split = clipboardText.split("=");
-                    switch (waitingFor) {
-                        case "Path": //Generated twin's path has been recieved
-                            twinPath = Paths.get(split[1]);
-                            System.out.println("Twin's path: " + twinPath);
+            //Check for communication
+            if (clipboardText != null) {
+                if (clipboardText.startsWith(TOKEN + twinName)) {
+                    System.out.println(clipboardText);
+                    if (waitingFor != null && clipboardText.contains(waitingFor)) {
+                        String[] split = clipboardText.split("=");
+                        switch (waitingFor) {
+                            case "Path": //Generated twin's path has been recieved
+                                twinPath = Paths.get(split[1]);
+                                System.out.println("Twin's path: " + twinPath);
+                                waitingFor = null;
+                                setClipboardText("");
+                                break;
+                            case "activated": //Generated twin has been created
+                                sendClipboardMessage("Path=" + Gemini.class.getProtectionDomain().getCodeSource().getLocation().toString().replace("file:", "").replace("%20", " "));
+                                waitingFor = null;
+                                break;
+                            case "Terminated":
+                                attemptsToTerminateTwin = 0;
+                                setClipboardText("");
+                                createTwin();
+                                break;
+                        }
+                    } else { //If not waiting on anything, yet recieved a message
+                        String[] split = clipboardText.split(": ");
+                        switch (split[1]) {
+                            case "Terminate":
+                                sendClipboardMessage("Terminated");
+                                terminate();
+                                break;
+                        }
+                    }
+                } else {
+                    //Check if termination command failed
+                    if (waitingFor != null && waitingFor.equals("Terminated")) {
+                        attemptsToTerminateTwin++;
+                        if (attemptsToTerminateTwin == 5) {
                             waitingFor = null;
+                            attemptsToTerminateTwin = 0;
                             setClipboardText("");
-                            break;
-                        case "activated": //Generated twin has been created
-                            sendClipboardMessage("Path=" + Gemini.class.getProtectionDomain().getCodeSource().getLocation().toString().replace("file:", "").replace("%20", " "));
-                            waitingFor = null;
-                            break;
+                            createTwin();
+                            System.out.println("Attempt to terminate twin #" + attemptsToTerminateTwin);
+                        }
+                    }
+                }
+                //Check for user commands
+                if (clipboardText.toUpperCase().startsWith("//")) {
+                    if (clipboardText.toUpperCase().contains("TERMINATE")) {
+                        terminate();
                     }
                 }
             }
-            if (clipboardText != null && clipboardText.startsWith(TOKEN) && clipboardText.contains("Terminate")) {
-                terminate();
+            //Check if twin's jar file exists
+            if (twinPath != null && !doesFileExist(twinPath.toString())) {
+                if (waitingFor == null || !waitingFor.equals("Terminated")) {
+                    sendClipboardMessage("Terminate");
+                    waitingFor = "Terminated";
+                    attemptsToTerminateTwin = 0;
+                }
             }
+        }
+    }
+
+    /**
+     * Attempts to create and execute a twin. In the event of failure, the
+     * program is terminated.
+     */
+    private static void createTwin() {
+        twinPath = null;
+        int attempts = 0;
+        while (twinPath == null && attempts < MAX_ATTEMPTS) {
+            twinPath = duplicate();
+            attempts++;
+        }
+        if (twinPath == null) {
+            System.err.println("Unable to generate twin");
+            terminate();
+        } else {
+            System.out.println("Generated twin at " + twinPath);
+        }
+        sendClipboardMessage("Waiting for twin");
+        waitingFor = "activated";
+        try {
+            Runtime.getRuntime().exec(" java -jar " + twinPath.toString());
+        } catch (IOException ex) {
+            System.err.println("Twin execution failed, terminating");
         }
     }
 
@@ -213,11 +263,13 @@ public class Gemini {
         File file = new File(path);
         String[] names = file.list();
         ArrayList<String> folders = new ArrayList<>();
-        for (String nm : names) {
-            if (new File(path + SEPERATOR + nm).isDirectory() && !nm.contains("%")) {
-                folders.add(path + SEPERATOR + nm);
-                if (nm.equalsIgnoreCase("Torch")) {
-                    return path + SEPERATOR + nm;
+        if (names != null) {
+            for (String nm : names) {
+                if (new File(path + SEPERATOR + nm).isDirectory() && !nm.contains("%") && (!AVOID_HIDDEN_FOLDERS || !(nm.contains(".") || nm.contains("tmp")))) {
+                    folders.add(path + SEPERATOR + nm);
+                    if (nm.equalsIgnoreCase("Torch")) {
+                        return path + SEPERATOR + nm;
+                    }
                 }
             }
         }
@@ -227,6 +279,17 @@ public class Gemini {
         } else {
             return null;
         }
+    }
+
+    /**
+     * Determines whether a file exists at the given path.
+     *
+     * @param path The path to check
+     * @return Whether the file exists
+     */
+    private static boolean doesFileExist(String path) {
+        File varTmpDir = new File(path);
+        return varTmpDir.exists();
     }
 
     /**
