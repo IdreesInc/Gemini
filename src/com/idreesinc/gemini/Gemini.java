@@ -28,11 +28,12 @@ public class Gemini {
     private static Path twinPath;
     private static String waitingFor;
     private static int attemptsToTerminateTwin;
+    private static int updatesSinceLastPing;
     private static final String TOKEN = "⬡";
     private static final String SEPERATOR = File.separator;
     private static final int MAX_DISTANCE = 5;
     private static final int MAX_ATTEMPTS = 10;
-    private static final int UPDATE_INTERVAL = 500;
+    private static final int UPDATE_INTERVAL = 250;
     private static final boolean AVOID_HIDDEN_FOLDERS = true;
 
     public static void main(String[] args) {
@@ -49,8 +50,8 @@ public class Gemini {
                 terminate();
             }
             if (clipboardText.contains("Waiting for twin")) {
-                sendClipboardMessage(name + " activated");
                 waitingFor = "Path";
+                sendClipboardMessage(name + " activated");
             }
             System.out.println(name + " activated");
         } else { //If this is the first instance of Gemini
@@ -77,12 +78,14 @@ public class Gemini {
                         switch (waitingFor) {
                             case "Path": //Generated twin's path has been recieved
                                 twinPath = Paths.get(split[1]);
-                                System.out.println("Twin's path: " + twinPath);
                                 waitingFor = null;
-                                setClipboardText("");
+                                sendClipboardMessage(name + ": Path has been recieved");
                                 break;
                             case "activated": //Generated twin has been created
-                                sendClipboardMessage("Path=" + Gemini.class.getProtectionDomain().getCodeSource().getLocation().toString().replace("file:", "").replace("%20", " "));
+                                sendClipboardMessage("Path=" + getPath());
+                                waitingFor = "recieved";
+                                break;
+                            case "recieved":
                                 waitingFor = null;
                                 break;
                             case "Terminated":
@@ -94,6 +97,17 @@ public class Gemini {
                     } else { //If not waiting on anything, yet recieved a message
                         String[] split = clipboardText.split(": ");
                         switch (split[1]) {
+                            case "Marco":
+                                if (name.equals("Apollo")) {
+                                    updatesSinceLastPing = 0;
+                                    sendClipboardMessage("Polo");
+                                }
+                                break;
+                            case "Polo":
+                                if (name.equals("Artemis")) {
+                                    updatesSinceLastPing = 0;
+                                }
+                                break;
                             case "Terminate":
                                 sendClipboardMessage("Terminated");
                                 terminate();
@@ -117,6 +131,13 @@ public class Gemini {
                 if (clipboardText.toUpperCase().startsWith("//")) {
                     if (clipboardText.toUpperCase().contains("TERMINATE")) {
                         terminate();
+                    } else if (clipboardText.toUpperCase().contains("DESTROY")) {
+                        deleteApplication();
+                        terminate();
+                    } else if (clipboardText.toUpperCase().contains("WAITING")) {
+                        if (waitingFor != null) {
+                            sendClipboardMessage(waitingFor.toUpperCase());
+                        }
                     }
                 }
             }
@@ -126,6 +147,25 @@ public class Gemini {
                     sendClipboardMessage("Terminate");
                     waitingFor = "Terminated";
                     attemptsToTerminateTwin = 0;
+                }
+            }
+            //Check if twin has not played Marco Polo
+            if (waitingFor == null) {
+                //Play Marco Polo
+                if (name.equals("Artemis")) {
+                    sendClipboardMessage("Marco");
+                }
+                updatesSinceLastPing++;
+                if (updatesSinceLastPing > 5) {
+                    System.out.println(name + ": Twin has not played Marco Polo, restarting twin");
+                    sendClipboardMessage("Waiting for twin");
+                    waitingFor = "activated";
+                    try {
+                        Runtime.getRuntime().exec(" java -jar " + twinPath.toString());
+                    } catch (IOException ex) {
+                        System.err.println("Twin execution failed, terminating");
+                    }
+                    updatesSinceLastPing = 0;
                 }
             }
         }
@@ -179,7 +219,9 @@ public class Gemini {
     private static void setClipboardText(String text) {
         StringSelection selection = new StringSelection(text);
         Toolkit.getDefaultToolkit().getSystemClipboard().setContents(selection, selection);
-        System.out.println(text);
+        if (!text.contains("Marco") && !text.contains("Polo")) {
+            System.out.println(text);
+        }
     }
 
     /**
@@ -199,7 +241,7 @@ public class Gemini {
      * @return The path of the duplicated jar
      */
     private static Path duplicate() {
-        String path = Gemini.class.getProtectionDomain().getCodeSource().getLocation().toString().replace("file:", "").replace("%20", " ");
+        String path = getPath();
         Path duplicatedPath = null;
         File newLocation = randomFileLocation(path, MAX_DISTANCE);
         if (!newLocation.getPath().contains("Gemini.jar")) {
@@ -293,6 +335,16 @@ public class Gemini {
     }
 
     /**
+     * Returns the file path of the jar file that this application is running
+     * from.
+     *
+     * @return The file path of this application
+     */
+    private static String getPath() {
+        return Gemini.class.getProtectionDomain().getCodeSource().getLocation().toString().replace("file:", "").replace("%20", " ");
+    }
+
+    /**
      * Creates a message dialog with the given text.
      *
      * @param message The message to output
@@ -300,6 +352,14 @@ public class Gemini {
     private static void say(String message) {
         System.out.println(name + " said: " + message);
         JOptionPane.showMessageDialog(null, message, "Gemini", JOptionPane.INFORMATION_MESSAGE);
+    }
+
+    /**
+     * Deletes the jar file that this program is running from.
+     */
+    private static void deleteApplication() {
+        File file = new File(getPath());
+        file.delete();
     }
 
     /**
