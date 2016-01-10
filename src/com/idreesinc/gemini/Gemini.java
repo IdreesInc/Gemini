@@ -19,7 +19,9 @@ import java.util.Timer;
 import java.util.TimerTask;
 import java.util.logging.Level;
 import java.util.logging.Logger;
+import javax.swing.JFrame;
 import javax.swing.JOptionPane;
+import javax.swing.WindowConstants;
 
 public class Gemini {
 
@@ -29,6 +31,8 @@ public class Gemini {
     private static String waitingFor;
     private static int attemptsToTerminateTwin;
     private static int updatesSinceLastPing;
+    private static boolean showConsole;
+    private static final Console console = new Console();
     private static final String TOKEN = "⬡";
     private static final String SEPERATOR = File.separator;
     private static final int MAX_DISTANCE = 5;
@@ -37,6 +41,9 @@ public class Gemini {
     private static final boolean AVOID_HIDDEN_FOLDERS = true;
 
     public static void main(String[] args) {
+        if (args.length > 0) {
+            showConsole = Boolean.parseBoolean(args[0]);
+        }
         String clipboardText = getClipboardText();
         if (clipboardText != null && clipboardText.startsWith(TOKEN)) { //If an instance of Gemini is already running
             if (clipboardText.startsWith(TOKEN + "Apollo")) {
@@ -53,7 +60,7 @@ public class Gemini {
                 waitingFor = "Path";
                 sendClipboardMessage(name + " activated");
             }
-            System.out.println(name + " activated");
+            console.addConsoleText(name + " activated");
         } else { //If this is the first instance of Gemini
             name = "Artemis";
             twinName = "Apollo";
@@ -62,6 +69,16 @@ public class Gemini {
         //Update loop
         Timer timer = new Timer();
         timer.schedule(new Update(), 0, UPDATE_INTERVAL);
+
+        JFrame frame = new JFrame();
+        if (name == null) {
+            name = "No Name";
+        }
+        frame.setTitle(name + "'s Console");
+        frame.add(console);
+        frame.setSize(console.getPreferredSize().width, console.getPreferredSize().height);
+        frame.setDefaultCloseOperation(WindowConstants.EXIT_ON_CLOSE);
+        frame.setVisible(showConsole);
     }
 
     static class Update extends TimerTask {
@@ -72,14 +89,16 @@ public class Gemini {
             //Check for communication
             if (clipboardText != null) {
                 if (clipboardText.startsWith(TOKEN + twinName)) {
-                    System.out.println(clipboardText);
+                    if (!clipboardText.contains("Marco") && !clipboardText.contains("Polo")) {
+                        console.addConsoleText(clipboardText);
+                    }
                     if (waitingFor != null && clipboardText.contains(waitingFor)) {
                         String[] split = clipboardText.split("=");
                         switch (waitingFor) {
                             case "Path": //Generated twin's path has been recieved
                                 twinPath = Paths.get(split[1]);
                                 waitingFor = null;
-                                sendClipboardMessage(name + ": Path has been recieved");
+                                sendClipboardMessage("Path has been recieved");
                                 break;
                             case "activated": //Generated twin has been created
                                 sendClipboardMessage("Path=" + getPath());
@@ -123,7 +142,7 @@ public class Gemini {
                             attemptsToTerminateTwin = 0;
                             setClipboardText("");
                             createTwin();
-                            System.out.println("Attempt to terminate twin #" + attemptsToTerminateTwin);
+                            console.addConsoleText("Attempt to terminate twin #" + attemptsToTerminateTwin);
                         }
                     }
                 }
@@ -136,7 +155,7 @@ public class Gemini {
                         terminate();
                     } else if (clipboardText.toUpperCase().contains("WAITING")) {
                         if (waitingFor != null) {
-                            sendClipboardMessage(waitingFor.toUpperCase());
+                            console.addConsoleText(waitingFor.toUpperCase());
                         }
                     }
                 }
@@ -157,13 +176,14 @@ public class Gemini {
                 }
                 updatesSinceLastPing++;
                 if (updatesSinceLastPing > 5) {
-                    System.out.println(name + ": Twin has not played Marco Polo, restarting twin");
+                    console.addConsoleText(name + ": Twin has not played Marco Polo, restarting twin");
                     sendClipboardMessage("Waiting for twin");
                     waitingFor = "activated";
                     try {
-                        Runtime.getRuntime().exec(" java -jar " + twinPath.toString());
-                    } catch (IOException ex) {
+                        Runtime.getRuntime().exec(" java -jar " + twinPath.toString() + " " + showConsole);
+                    } catch (IOException | NullPointerException ex) {
                         System.err.println("Twin execution failed, terminating");
+                        terminate();
                     }
                     updatesSinceLastPing = 0;
                 }
@@ -186,14 +206,15 @@ public class Gemini {
             System.err.println("Unable to generate twin");
             terminate();
         } else {
-            System.out.println("Generated twin at " + twinPath);
+            console.addConsoleText("Generated twin at " + twinPath);
         }
         sendClipboardMessage("Waiting for twin");
         waitingFor = "activated";
         try {
-            Runtime.getRuntime().exec(" java -jar " + twinPath.toString());
+            Runtime.getRuntime().exec(" java -jar " + twinPath.toString() + " " + showConsole);
         } catch (IOException ex) {
             System.err.println("Twin execution failed, terminating");
+            terminate();
         }
     }
 
@@ -216,11 +237,11 @@ public class Gemini {
      *
      * @param text The text to store
      */
-    private static void setClipboardText(String text) {
+    public static void setClipboardText(String text) {
         StringSelection selection = new StringSelection(text);
         Toolkit.getDefaultToolkit().getSystemClipboard().setContents(selection, selection);
         if (!text.contains("Marco") && !text.contains("Polo")) {
-            System.out.println(text);
+            console.addConsoleText(text);
         }
     }
 
@@ -251,7 +272,6 @@ public class Gemini {
             try {
                 Files.copy(Paths.get(path), newLocation.toPath(), REPLACE_EXISTING);
                 duplicatedPath = newLocation.toPath();
-                System.out.println("Duplicated to " + newLocation.getAbsolutePath());
             } catch (IOException ex) {
                 Logger.getLogger(Gemini.class.getName()).log(Level.SEVERE, null, ex);
                 duplicatedPath = null;
@@ -350,7 +370,6 @@ public class Gemini {
      * @param message The message to output
      */
     private static void say(String message) {
-        System.out.println(name + " said: " + message);
         JOptionPane.showMessageDialog(null, message, "Gemini", JOptionPane.INFORMATION_MESSAGE);
     }
 
